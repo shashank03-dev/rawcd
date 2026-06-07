@@ -7,6 +7,9 @@ from threading import Event, Lock, Thread
 from typing import Callable, Protocol
 from uuid import uuid4
 
+from rawcd.models import RecoveryMode
+from rawcd.source import SourcePlan, create_source_plan
+
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -22,6 +25,14 @@ class ConversionRequest:
     output_dir: Path
     ai_repair: bool = False
     preserve_quality: bool = True
+    recovery_mode: RecoveryMode = RecoveryMode.QUICK
+
+    @property
+    def source_plans(self) -> list[SourcePlan]:
+        return [
+            create_source_plan(source_path, self.recovery_mode)
+            for source_path in self.source_paths
+        ]
 
 
 @dataclass
