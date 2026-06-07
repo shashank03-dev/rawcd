@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from math import inf
 from pathlib import Path
 
 import pytest
@@ -100,37 +101,59 @@ def test_frame_range_rejects_negative_duration() -> None:
         )
 
 
-def test_report_defaults_are_isolated_and_serializable() -> None:
-    first = RestoreReport()
-    second = RestoreReport()
+def test_frame_range_rejects_invalid_start_time() -> None:
+    with pytest.raises(ValueError, match="start_seconds"):
+        FrameRange(
+            start_seconds=-0.1,
+            end_seconds=1.0,
+            state=FrameState.DAMAGED,
+        )
 
-    first.warnings.append("first warning")
-    first.timeline.ranges.append(
+
+def test_frame_range_rejects_non_finite_timestamps() -> None:
+    with pytest.raises(ValueError, match="finite"):
         FrameRange(
             start_seconds=1.0,
-            end_seconds=1.5,
+            end_seconds=inf,
             state=FrameState.DAMAGED,
-            reason="freeze",
         )
-    )
 
-    assert second.warnings == []
-    assert second.timeline.ranges == []
+
+def test_report_defaults_are_isolated_immutable_and_serializable() -> None:
+    damaged_range = FrameRange(
+        start_seconds=1.0,
+        end_seconds=1.5,
+        state=FrameState.DAMAGED,
+        reason="freeze",
+    )
+    first = RestoreReport(
+        warnings=("first warning",),
+        timeline=FrameTimeline(ranges=(damaged_range,)),
+    )
+    second = RestoreReport()
+
+    with pytest.raises(AttributeError):
+        first.warnings.append("another warning")
+    with pytest.raises(AttributeError):
+        first.timeline.ranges.append(damaged_range)
+
+    assert second.warnings == ()
+    assert second.timeline.ranges == ()
     assert asdict(first) == {
         "lane": RestoreLane.HOME,
         "mode": RestoreMode.FAITHFUL,
         "recovery_mode": RecoveryMode.QUICK,
         "clips": 0,
-        "warnings": ["first warning"],
+        "warnings": ("first warning",),
         "timeline": {
-            "ranges": [
+            "ranges": (
                 {
                     "start_seconds": 1.0,
                     "end_seconds": 1.5,
                     "state": FrameState.DAMAGED,
                     "reason": "freeze",
-                }
-            ],
+                },
+            ),
             "duration_seconds": None,
             "frame_rate": None,
         },

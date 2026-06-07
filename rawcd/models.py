@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import field
 from dataclasses import dataclass
+from dataclasses import field
 from enum import Enum
+from math import isfinite
 from pathlib import Path
 
 
@@ -81,13 +82,17 @@ class FrameRange:
     reason: str = ""
 
     def __post_init__(self) -> None:
+        if not isfinite(self.start_seconds) or not isfinite(self.end_seconds):
+            raise ValueError("frame range timestamps must be finite")
+        if self.start_seconds < 0:
+            raise ValueError("start_seconds must be greater than or equal to zero")
         if self.end_seconds < self.start_seconds:
             raise ValueError("end_seconds must be greater than or equal to start_seconds")
 
 
 @dataclass(frozen=True)
 class FrameTimeline:
-    ranges: list[FrameRange] = field(default_factory=list)
+    ranges: tuple[FrameRange, ...] = field(default_factory=tuple)
     duration_seconds: float | None = None
     frame_rate: str | None = None
 
@@ -98,7 +103,7 @@ class RestoreReport:
     mode: RestoreMode = RestoreMode.FAITHFUL
     recovery_mode: RecoveryMode = RecoveryMode.QUICK
     clips: int = 0
-    warnings: list[str] = field(default_factory=list)
+    warnings: tuple[str, ...] = field(default_factory=tuple)
     timeline: FrameTimeline = field(default_factory=FrameTimeline)
 
 
