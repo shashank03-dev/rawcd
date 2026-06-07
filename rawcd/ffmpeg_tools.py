@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from rawcd.exporter import build_home_mp4_command
+
 
 @dataclass(frozen=True)
 class VideoStream:
@@ -62,30 +64,7 @@ def parse_ffprobe_json(payload: str) -> MediaProbe:
 
 
 def build_mp4_command(input_path: Path, output_path: Path) -> list[str]:
-    return [
-        "ffmpeg",
-        "-hide_banner",
-        "-y",
-        "-i",
-        str(input_path),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a:0?",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "slow",
-        "-crf",
-        "18",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-movflags",
-        "+faststart",
-        str(output_path),
-    ]
+    return build_home_mp4_command(input_path, output_path)
 
 
 def build_freezedetect_command(input_path: Path) -> list[str]:

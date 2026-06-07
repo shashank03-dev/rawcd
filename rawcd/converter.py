@@ -5,12 +5,13 @@ import subprocess  # nosec B404
 from pathlib import Path
 from typing import Callable, Protocol
 
+from rawcd.exporter import build_export_command, output_extension
 from rawcd.ffmpeg_tools import (
     build_freezedetect_command,
-    build_mp4_command,
     is_protected_media_error,
 )
 from rawcd.jobs import ConversionRequest
+from rawcd.models import ExportProfile
 from rawcd.repair import FrameIssue, parse_freezedetect_output
 
 
@@ -66,8 +67,16 @@ class MediaConverter:
             if cancel_requested():
                 raise RuntimeError("conversion canceled")
 
-            output_path = self._unique_output_path(source_path, request.output_dir, outputs)
-            result = self._runner.run(build_mp4_command(source_path, output_path))
+            export_profile = ExportProfile.HOME_MP4
+            output_path = self._unique_output_path(
+                source_path,
+                request.output_dir,
+                outputs,
+                output_extension(export_profile),
+            )
+            result = self._runner.run(
+                build_export_command(source_path, output_path, export_profile)
+            )
             if result.returncode != 0:
                 self._raise_for_failure(result.stderr)
 
@@ -118,12 +127,13 @@ class MediaConverter:
         source_path: Path,
         output_dir: Path,
         existing_outputs: list[Path],
+        extension: str = ".mp4",
     ) -> Path:
         base = self._safe_stem(source_path.stem) or "clip"
-        candidate = output_dir / f"{base}.mp4"
+        candidate = output_dir / f"{base}{extension}"
         index = 2
         while candidate in existing_outputs or candidate.exists():
-            candidate = output_dir / f"{base}-{index}.mp4"
+            candidate = output_dir / f"{base}-{index}{extension}"
             index += 1
         return candidate
 
