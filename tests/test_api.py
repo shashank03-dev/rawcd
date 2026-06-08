@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from rawcd.api import create_app
 from rawcd.devices import OpticalDevice
 from rawcd.jobs import ConversionRequest, JobManager
+from rawcd.models import RecoveryMode, RestoreMode
+from rawcd.recovery import DdrescueAdapter, RecoveryPlanner
 
 
 def test_scan_devices_endpoint_returns_optical_drives(tmp_path: Path) -> None:
@@ -104,3 +106,59 @@ def test_start_conversion_expands_user_output_path(tmp_path: Path, monkeypatch) 
     assert response.status_code == 200
     assert captured["request"].source_paths == [tmp_path / "disc" / "clip.dat"]
     assert captured["request"].output_dir == tmp_path / "Videos" / "RawCD"
+    assert captured["request"].recovery_mode is RecoveryMode.QUICK
+    assert captured["request"].restore_mode is RestoreMode.FAITHFUL
+
+
+def test_start_conversion_accepts_explicit_recovery_and_restore_modes(
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, ConversionRequest] = {}
+
+    def converter(request: ConversionRequest, _cancel_requested) -> dict:
+        captured["request"] = request
+        return {
+            "outputs": [],
+            "report": {"clips": 0},
+            "warnings": ["converter warning"],
+        }
+
+    class MissingRunner:
+        def run(self, command: list[str]):
+            raise FileNotFoundError(command[0])
+
+    manager = JobManager(
+        converter=converter,
+        run_inline=True,
+        recovery_planner=RecoveryPlanner(
+            rescue_adapter=DdrescueAdapter(runner=MissingRunner())
+        ),
+    )
+    client = TestClient(create_app(job_manager=manager))
+
+    response = client.post(
+        "/start_conversion",
+        json={
+            "source_paths": ["/media/OLD_DISC/clip.vob"],
+            "output_dir": str(tmp_path),
+            "ai_repair": False,
+            "recovery_mode": "maximum",
+            "restore_mode": "enhanced",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert captured["request"].recovery_mode is RecoveryMode.MAXIMUM
+    assert captured["request"].restore_mode is RestoreMode.ENHANCED
+    assert payload["recovery_warnings"] == [
+        "ddrescue is not installed; using the direct source instead of a recovered image."
+    ]
+    assert payload["warnings"] == [
+        "ddrescue is not installed; using the direct source instead of a recovered image.",
+        "converter warning",
+    ]
+
+    status = client.get(f"/get_job_status/{payload['job_id']}")
+    assert status.status_code == 200
+    assert status.json()["recovery_warnings"] == payload["recovery_warnings"]

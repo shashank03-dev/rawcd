@@ -12,6 +12,7 @@ from rawcd.converter import MediaConverter
 from rawcd.devices import OpticalDriveScanner
 from rawcd.disc import DiscClassifier, DiscInspection
 from rawcd.jobs import ConversionJob, ConversionRequest, JobManager
+from rawcd.models import RecoveryMode, RestoreMode
 
 
 class InspectDiscRequest(BaseModel):
@@ -23,6 +24,8 @@ class StartConversionRequest(BaseModel):
     output_dir: str
     ai_repair: bool = False
     preserve_quality: bool = True
+    recovery_mode: RecoveryMode = RecoveryMode.QUICK
+    restore_mode: RestoreMode = RestoreMode.FAITHFUL
 
 
 def create_app(
@@ -65,6 +68,8 @@ def create_app(
                 output_dir=Path(request.output_dir).expanduser(),
                 ai_repair=request.ai_repair,
                 preserve_quality=request.preserve_quality,
+                recovery_mode=request.recovery_mode,
+                restore_mode=request.restore_mode,
             )
         )
         return _serialize_job(manager.get_job_status(job.job_id))
@@ -108,6 +113,7 @@ def _serialize_job(job: ConversionJob) -> dict[str, Any]:
         "progress": job.progress,
         "outputs": [str(path) for path in job.outputs],
         "warnings": job.warnings,
+        "recovery_warnings": job.recovery_warnings,
         "report": job.report,
         "error": job.error,
     }

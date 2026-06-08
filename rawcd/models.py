@@ -22,6 +22,12 @@ class RecoveryMode(str, Enum):
     MAXIMUM = "maximum"
 
 
+class RecoverySeverity(str, Enum):
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+
+
 class SourceState(str, Enum):
     MOUNTED = "mounted"
     RECOVERED_IMAGE = "recovered_image"
@@ -75,6 +81,34 @@ class RestoreSource:
 
 
 @dataclass(frozen=True)
+class RecoveryAttempt:
+    tool: str
+    command: tuple[str, ...]
+    retry_count: int = 0
+    returncode: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    error: str | None = None
+    image_path: Path | None = None
+    map_path: Path | None = None
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True)
+class RecoveryResult:
+    input_path: Path
+    mode: RecoveryMode
+    source_path: Path
+    work_dir: Path | None = None
+    image_path: Path | None = None
+    map_path: Path | None = None
+    retry_count: int = 0
+    attempts: tuple[RecoveryAttempt, ...] = field(default_factory=tuple)
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+    severity: RecoverySeverity = RecoverySeverity.INFO
+
+
+@dataclass(frozen=True)
 class FrameRange:
     start_seconds: float
     end_seconds: float
@@ -114,7 +148,10 @@ __all__ = [
     "FrameTimeline",
     "ProviderCapability",
     "ProviderKind",
+    "RecoveryAttempt",
     "RecoveryMode",
+    "RecoveryResult",
+    "RecoverySeverity",
     "RestoreLane",
     "RestoreMode",
     "RestoreReport",

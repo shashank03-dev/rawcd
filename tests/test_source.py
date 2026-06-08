@@ -32,6 +32,13 @@ def test_create_source_plan_for_maximum_recovery_source() -> None:
     assert plan.source.recovery_mode is RecoveryMode.MAXIMUM
 
 
+def test_create_source_plan_accepts_stable_api_string_values() -> None:
+    plan = create_source_plan(Path("/media/OLD_DISC"), "maximum")  # type: ignore[arg-type]
+
+    assert plan.recovery_mode is RecoveryMode.MAXIMUM
+    assert plan.recovery_requested is True
+
+
 def test_source_plan_can_switch_to_recovered_image_path() -> None:
     plan = create_source_plan(Path("/media/OLD_DISC"), RecoveryMode.MAXIMUM)
 

@@ -31,7 +31,9 @@ describe("engine client", () => {
       source_paths: ["/disc/clip.dat"],
       output_dir: "~/Videos",
       ai_repair: true,
-      preserve_quality: true
+      preserve_quality: true,
+      recovery_mode: "maximum",
+      restore_mode: "enhanced"
     });
 
     expect(job.job_id).toBe("job-1");
@@ -43,10 +45,41 @@ describe("engine client", () => {
             source_paths: ["/disc/clip.dat"],
             output_dir: "~/Videos",
             ai_repair: true,
-            preserve_quality: true
+            preserve_quality: true,
+            recovery_mode: "maximum",
+            restore_mode: "enhanced"
           }
         }
       ]
+    ]);
+  });
+
+  it("keeps recovery and restore modes optional for legacy conversion requests", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const client = createEngineClient({
+      invoke: async (command, args) => {
+        calls.push([command, args]);
+        return { job_id: "job-legacy", status: "running" };
+      }
+    });
+
+    await client.startConversion({
+      source_paths: ["/disc/clip.dat"],
+      output_dir: "~/Videos",
+      ai_repair: false,
+      preserve_quality: true
+    });
+
+    expect(calls[0]).toEqual([
+      "start_conversion",
+      {
+        request: {
+          source_paths: ["/disc/clip.dat"],
+          output_dir: "~/Videos",
+          ai_repair: false,
+          preserve_quality: true
+        }
+      }
     ]);
   });
 

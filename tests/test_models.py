@@ -11,6 +11,7 @@ from rawcd.models import (
     FrameTimeline,
     ProviderCapability,
     ProviderKind,
+    RecoverySeverity,
     RecoveryMode,
     RestoreLane,
     RestoreMode,
@@ -27,6 +28,9 @@ def test_restore_mode_enum_values_are_stable_api_strings() -> None:
     assert RestoreMode.ENHANCED.value == "enhanced"
     assert RecoveryMode.QUICK.value == "quick"
     assert RecoveryMode.MAXIMUM.value == "maximum"
+    assert RecoverySeverity.INFO.value == "info"
+    assert RecoverySeverity.WARNING.value == "warning"
+    assert RecoverySeverity.ERROR.value == "error"
 
 
 def test_source_state_enum_values_are_stable_api_strings() -> None:

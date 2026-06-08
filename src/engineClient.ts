@@ -26,6 +26,8 @@ export type StartConversionRequest = {
   output_dir: string;
   ai_repair: boolean;
   preserve_quality: boolean;
+  recovery_mode?: "quick" | "maximum";
+  restore_mode?: "faithful" | "enhanced";
 };
 
 export type JobStatusPayload = {
@@ -35,6 +37,7 @@ export type JobStatusPayload = {
   progress: number;
   outputs: string[];
   warnings: string[];
+  recovery_warnings?: string[];
   report: Record<string, unknown>;
   error?: string | null;
 };

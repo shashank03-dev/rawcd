@@ -134,6 +134,10 @@ struct StartConversionRequest {
     output_dir: String,
     ai_repair: bool,
     preserve_quality: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    restore_mode: Option<String>,
 }
 
 #[tauri::command]
@@ -209,7 +213,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{engine_url, python_server_args};
+    use super::{engine_url, python_server_args, StartConversionRequest};
+    use serde_json::json;
 
     #[test]
     fn builds_engine_endpoint_url_without_double_slashes() {
@@ -228,6 +233,52 @@ mod tests {
         assert_eq!(
             python_server_args("127.0.0.1", 8765),
             vec!["-m", "rawcd.server", "--host", "127.0.0.1", "--port", "8765"]
+        );
+    }
+
+    #[test]
+    fn serializes_conversion_restore_modes_for_engine_forwarding() {
+        let request = StartConversionRequest {
+            source_paths: vec!["/media/DISC/clip.vob".to_string()],
+            output_dir: "~/Videos/RawCD".to_string(),
+            ai_repair: false,
+            preserve_quality: true,
+            recovery_mode: Some("maximum".to_string()),
+            restore_mode: Some("enhanced".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            json!({
+                "source_paths": ["/media/DISC/clip.vob"],
+                "output_dir": "~/Videos/RawCD",
+                "ai_repair": false,
+                "preserve_quality": true,
+                "recovery_mode": "maximum",
+                "restore_mode": "enhanced"
+            })
+        );
+    }
+
+    #[test]
+    fn omits_conversion_restore_modes_for_legacy_engine_requests() {
+        let request = StartConversionRequest {
+            source_paths: vec!["/media/DISC/clip.vob".to_string()],
+            output_dir: "~/Videos/RawCD".to_string(),
+            ai_repair: false,
+            preserve_quality: true,
+            recovery_mode: None,
+            restore_mode: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            json!({
+                "source_paths": ["/media/DISC/clip.vob"],
+                "output_dir": "~/Videos/RawCD",
+                "ai_repair": false,
+                "preserve_quality": true
+            })
         );
     }
 }

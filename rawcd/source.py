@@ -36,14 +36,15 @@ class SourcePlan:
 
 
 def create_source_plan(input_path: Path, recovery_mode: RecoveryMode) -> SourcePlan:
+    normalized_mode = RecoveryMode(recovery_mode)
     return SourcePlan(
         input_path=input_path,
-        recovery_mode=recovery_mode,
+        recovery_mode=normalized_mode,
         source=RestoreSource(
             path=input_path,
             state=SourceState.MOUNTED,
             label=input_path.name or str(input_path),
-            recovery_mode=recovery_mode,
+            recovery_mode=normalized_mode,
         ),
     )
 

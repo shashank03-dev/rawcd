@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from threading import Event, Lock, Thread
 from typing import Callable, Protocol
 from uuid import uuid4
 
-from rawcd.models import RecoveryMode
+from rawcd.models import RecoveryMode, RestoreMode
+from rawcd.recovery import DdrescueAdapter, RecoveryPlanner, RecoveryResult
 from rawcd.source import SourcePlan, create_source_plan
+
+
+class ConversionCanceled(RuntimeError):
+    pass
 
 
 class JobStatus(str, Enum):
@@ -26,6 +31,7 @@ class ConversionRequest:
     ai_repair: bool = False
     preserve_quality: bool = True
     recovery_mode: RecoveryMode = RecoveryMode.QUICK
+    restore_mode: RestoreMode = RestoreMode.FAITHFUL
 
     @property
     def source_plans(self) -> list[SourcePlan]:
@@ -44,6 +50,7 @@ class ConversionJob:
     progress: float = 0.0
     outputs: list[Path] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    recovery_warnings: list[str] = field(default_factory=list)
     report: dict = field(default_factory=dict)
     error: str | None = None
 
@@ -58,9 +65,17 @@ class Converter(Protocol):
 
 
 class JobManager:
-    def __init__(self, converter: Converter, run_inline: bool = False) -> None:
+    def __init__(
+        self,
+        converter: Converter,
+        run_inline: bool = False,
+        recovery_planner: RecoveryPlanner | None = None,
+    ) -> None:
         self._converter = converter
         self._run_inline = run_inline
+        self._recovery_planner = recovery_planner or RecoveryPlanner(
+            rescue_adapter=DdrescueAdapter()
+        )
         self._jobs: dict[str, ConversionJob] = {}
         self._cancel_events: dict[str, Event] = {}
         self._lock = Lock()
@@ -95,10 +110,9 @@ class JobManager:
             if job.status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED}:
                 return False
             event.set()
-            if job.status is JobStatus.PENDING:
-                job.status = JobStatus.CANCELED
-                job.stage = "canceled"
-                job.progress = 0.0
+            job.status = JobStatus.CANCELED
+            job.stage = "canceled"
+            job.progress = 0.0
             return True
 
     def _run_job(self, job_id: str) -> None:
@@ -110,13 +124,44 @@ class JobManager:
                 job.stage = "canceled"
                 return
             job.status = JobStatus.RUNNING
-            job.stage = "converting"
+            job.stage = "recovering"
             job.progress = 0.05
 
         try:
-            result = self._converter(job.request, event.is_set)
+            recovery_results = self._plan_recovery(job.request, event.is_set)
+            recovery_warnings = [
+                warning
+                for recovery_result in recovery_results
+                for warning in recovery_result.warnings
+            ]
+            with self._lock:
+                if event.is_set():
+                    raise ConversionCanceled("conversion canceled")
+                job.recovery_warnings = recovery_warnings
+                job.warnings = list(recovery_warnings)
+                job.stage = "converting"
+                job.progress = 0.2
+            recovered_request = replace(
+                job.request,
+                source_paths=[
+                    recovery_result.source_path
+                    for recovery_result in recovery_results
+                ],
+            )
+            result = self._converter(recovered_request, event.is_set)
+        except ConversionCanceled:
+            with self._lock:
+                job.status = JobStatus.CANCELED
+                job.stage = "canceled"
+                job.progress = 0.0
+            return
         except Exception as exc:
             with self._lock:
+                if event.is_set():
+                    job.status = JobStatus.CANCELED
+                    job.stage = "canceled"
+                    job.progress = 0.0
+                    return
                 job.status = JobStatus.FAILED
                 job.stage = "failed"
                 job.error = str(exc)
@@ -132,4 +177,24 @@ class JobManager:
             job.progress = 1.0
             job.outputs = [Path(path) for path in result.get("outputs", [])]
             job.report = dict(result.get("report", {}))
-            job.warnings = list(result.get("warnings", []))
+            job.warnings = list(job.recovery_warnings) + list(result.get("warnings", []))
+
+    def _plan_recovery(
+        self,
+        request: ConversionRequest,
+        cancel_requested: Callable[[], bool],
+    ) -> list[RecoveryResult]:
+        results: list[RecoveryResult] = []
+        for source_path in request.source_paths:
+            if cancel_requested():
+                raise ConversionCanceled("conversion canceled")
+            results.append(
+                self._recovery_planner.plan(
+                    source_path,
+                    request.output_dir,
+                    request.recovery_mode,
+                )
+            )
+            if cancel_requested():
+                raise ConversionCanceled("conversion canceled")
+        return results
