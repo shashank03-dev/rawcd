@@ -1,6 +1,8 @@
 from pathlib import Path
+from subprocess import CompletedProcess
 
 from rawcd.disc import DiscClassifier, DiscType, SourceKind
+from rawcd.parser import DiscType as ParserDiscType
 
 
 def touch(path: Path) -> Path:
@@ -50,13 +52,36 @@ def test_classifies_data_disc_video_files_in_stable_order(tmp_path: Path) -> Non
     ]
 
 
-def test_unknown_disc_has_actionable_warning(tmp_path: Path) -> None:
+def test_data_disc_without_video_has_actionable_warning(tmp_path: Path) -> None:
     touch(tmp_path / "README.txt")
 
     result = DiscClassifier().classify(tmp_path)
 
-    assert result.disc_type is DiscType.UNKNOWN
+    assert result.disc_type is DiscType.DATA_DISC
     assert result.playable_sources == []
     assert result.warnings == [
-        "No DVD-Video, VCD/SVCD, or supported video files were found."
+        "No supported video files were found on this data disc."
     ]
+
+
+def test_disc_module_reexports_parser_disc_type_for_compatibility() -> None:
+    assert DiscType is ParserDiscType
+
+
+def test_classifier_uses_tool_output_to_detect_protected_dvd(tmp_path: Path) -> None:
+    touch(tmp_path / "VIDEO_TS" / "VIDEO_TS.IFO")
+    touch(tmp_path / "VIDEO_TS" / "VTS_01_1.VOB")
+
+    class ProtectedProbe:
+        def run(self, command: list[str]) -> CompletedProcess[str]:
+            return CompletedProcess(
+                command,
+                1,
+                stdout="",
+                stderr="libdvdread: Encrypted DVD support unavailable",
+            )
+
+    result = DiscClassifier(probe_runner=ProtectedProbe()).classify(tmp_path)
+
+    assert result.disc_type is DiscType.PROTECTED_MEDIA
+    assert result.playable_sources == []

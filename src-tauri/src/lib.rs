@@ -40,7 +40,10 @@ impl EngineState {
     fn new() -> Self {
         Self {
             base_url: format!("http://{}:{}", ENGINE_HOST, ENGINE_PORT),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("failed to build RawCD engine HTTP client"),
             child: Mutex::new(None),
             work_dir: engine_work_dir(),
         }
@@ -134,6 +137,10 @@ struct StartConversionRequest {
     output_dir: String,
     ai_repair: bool,
     preserve_quality: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    recovery_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    restore_mode: Option<String>,
 }
 
 #[tauri::command]
@@ -165,6 +172,29 @@ async fn get_job_status(state: State<'_, EngineState>, job_id: String) -> Result
 #[tauri::command]
 async fn cancel_job(state: State<'_, EngineState>, job_id: String) -> Result<Value, String> {
     state.post_json(&format!("/cancel_job/{job_id}"), &serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+async fn list_providers(state: State<'_, EngineState>) -> Result<Value, String> {
+    state.get_json("/providers").await
+}
+
+#[tauri::command]
+async fn test_provider(state: State<'_, EngineState>, provider_id: String) -> Result<Value, String> {
+    state
+        .post_json(&format!("/providers/{provider_id}/test"), &serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+async fn configure_provider(
+    state: State<'_, EngineState>,
+    provider_id: String,
+    request: Value,
+) -> Result<Value, String> {
+    state
+        .post_json(&format!("/providers/{provider_id}/configure"), &request)
         .await
 }
 
@@ -201,6 +231,9 @@ pub fn run() {
             start_conversion,
             get_job_status,
             cancel_job,
+            list_providers,
+            test_provider,
+            configure_provider,
             open_output_folder
         ])
         .run(tauri::generate_context!())
@@ -209,7 +242,8 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{engine_url, python_server_args};
+    use super::{engine_url, python_server_args, StartConversionRequest};
+    use serde_json::json;
 
     #[test]
     fn builds_engine_endpoint_url_without_double_slashes() {
@@ -228,6 +262,52 @@ mod tests {
         assert_eq!(
             python_server_args("127.0.0.1", 8765),
             vec!["-m", "rawcd.server", "--host", "127.0.0.1", "--port", "8765"]
+        );
+    }
+
+    #[test]
+    fn serializes_conversion_restore_modes_for_engine_forwarding() {
+        let request = StartConversionRequest {
+            source_paths: vec!["/media/DISC/clip.vob".to_string()],
+            output_dir: "~/Videos/RawCD".to_string(),
+            ai_repair: false,
+            preserve_quality: true,
+            recovery_mode: Some("maximum".to_string()),
+            restore_mode: Some("enhanced".to_string()),
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            json!({
+                "source_paths": ["/media/DISC/clip.vob"],
+                "output_dir": "~/Videos/RawCD",
+                "ai_repair": false,
+                "preserve_quality": true,
+                "recovery_mode": "maximum",
+                "restore_mode": "enhanced"
+            })
+        );
+    }
+
+    #[test]
+    fn omits_conversion_restore_modes_for_legacy_engine_requests() {
+        let request = StartConversionRequest {
+            source_paths: vec!["/media/DISC/clip.vob".to_string()],
+            output_dir: "~/Videos/RawCD".to_string(),
+            ai_repair: false,
+            preserve_quality: true,
+            recovery_mode: None,
+            restore_mode: None,
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            json!({
+                "source_paths": ["/media/DISC/clip.vob"],
+                "output_dir": "~/Videos/RawCD",
+                "ai_repair": false,
+                "preserve_quality": true
+            })
         );
     }
 }
