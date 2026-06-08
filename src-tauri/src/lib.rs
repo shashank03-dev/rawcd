@@ -40,7 +40,10 @@ impl EngineState {
     fn new() -> Self {
         Self {
             base_url: format!("http://{}:{}", ENGINE_HOST, ENGINE_PORT),
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .build()
+                .expect("failed to build RawCD engine HTTP client"),
             child: Mutex::new(None),
             work_dir: engine_work_dir(),
         }
@@ -172,6 +175,29 @@ async fn cancel_job(state: State<'_, EngineState>, job_id: String) -> Result<Val
         .await
 }
 
+#[tauri::command]
+async fn list_providers(state: State<'_, EngineState>) -> Result<Value, String> {
+    state.get_json("/providers").await
+}
+
+#[tauri::command]
+async fn test_provider(state: State<'_, EngineState>, provider_id: String) -> Result<Value, String> {
+    state
+        .post_json(&format!("/providers/{provider_id}/test"), &serde_json::json!({}))
+        .await
+}
+
+#[tauri::command]
+async fn configure_provider(
+    state: State<'_, EngineState>,
+    provider_id: String,
+    request: Value,
+) -> Result<Value, String> {
+    state
+        .post_json(&format!("/providers/{provider_id}/configure"), &request)
+        .await
+}
+
 #[derive(Serialize)]
 struct OpenFolderResult {
     opened: bool,
@@ -205,6 +231,9 @@ pub fn run() {
             start_conversion,
             get_job_status,
             cancel_job,
+            list_providers,
+            test_provider,
+            configure_provider,
             open_output_folder
         ])
         .run(tauri::generate_context!())

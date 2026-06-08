@@ -42,6 +42,38 @@ export type JobStatusPayload = {
   error?: string | null;
 };
 
+export type ProviderSettingsPayload = {
+  provider_id: string;
+  enabled: boolean;
+  api_key_configured: boolean;
+  api_key: null;
+  base_url?: string | null;
+  executable_path?: string | null;
+  extra: Record<string, unknown>;
+};
+
+export type ProviderPayload = {
+  id: string;
+  label: string;
+  kind: string;
+  capabilities: string[];
+  settings: ProviderSettingsPayload;
+};
+
+export type ProviderHealthPayload = {
+  status: "available" | "unavailable" | "degraded" | "license_required";
+  message: string;
+  details: Record<string, string>;
+};
+
+export type ConfigureProviderRequest = {
+  enabled?: boolean | null;
+  api_key?: string | null;
+  base_url?: string | null;
+  executable_path?: string | null;
+  extra?: Record<string, unknown> | null;
+};
+
 type Invoke = <T>(command: string, args?: unknown) => Promise<T>;
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -58,6 +90,11 @@ export function createEngineClient(options?: { invoke?: Invoke }) {
       invoke<JobStatusPayload>("get_job_status", { jobId }),
     cancelJob: (jobId: string) =>
       invoke<{ cancelled: boolean }>("cancel_job", { jobId }),
+    listProviders: () => invoke<ProviderPayload[]>("list_providers"),
+    testProvider: (providerId: string) =>
+      invoke<ProviderHealthPayload>("test_provider", { providerId }),
+    configureProvider: (providerId: string, request: ConfigureProviderRequest) =>
+      invoke<ProviderPayload>("configure_provider", { providerId, request }),
     openOutputFolder: (path: string) =>
       invoke<{ opened: boolean }>("open_output_folder", { path })
   };
@@ -104,6 +141,12 @@ function httpRequestForCommand(
       return { path: `/get_job_status/${String(payload.jobId)}` };
     case "cancel_job":
       return post(`/cancel_job/${String(payload.jobId)}`, {});
+    case "list_providers":
+      return { path: "/providers" };
+    case "test_provider":
+      return post(`/providers/${String(payload.providerId)}/test`, {});
+    case "configure_provider":
+      return post(`/providers/${String(payload.providerId)}/configure`, payload.request);
     default:
       throw new Error(`Unsupported engine command: ${command}`);
   }

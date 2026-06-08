@@ -6,7 +6,10 @@ from rawcd.api import create_app
 from rawcd.devices import OpticalDevice
 from rawcd.jobs import ConversionRequest, JobManager
 from rawcd.models import RecoveryMode, RestoreMode
+from rawcd.models import ProviderCapability, ProviderKind
+from rawcd.providers.base import ProviderEstimate, ProviderHealth, ProviderInfo
 from rawcd.recovery import DdrescueAdapter, RecoveryPlanner
+from rawcd.settings import ProviderRegistry, ProviderSettingsStore
 
 
 def test_scan_devices_endpoint_returns_optical_drives(tmp_path: Path) -> None:
@@ -59,7 +62,11 @@ def test_conversion_job_endpoints_return_status(tmp_path: Path) -> None:
     output = tmp_path / "clip.mp4"
 
     def converter(_request: ConversionRequest, _cancel_requested) -> dict:
-        return {"outputs": [output], "report": {"clips": 1}, "warnings": []}
+        return {
+            "outputs": [output],
+            "report": {"clips": 1, "timeline": {"states": {"original": 1}, "ranges": []}},
+            "warnings": [],
+        }
 
     manager = JobManager(converter=converter, run_inline=True)
     client = TestClient(create_app(job_manager=manager))
@@ -80,7 +87,10 @@ def test_conversion_job_endpoints_return_status(tmp_path: Path) -> None:
     status = client.get(f"/get_job_status/{job_id}")
     assert status.status_code == 200
     assert status.json()["outputs"] == [str(output)]
-    assert status.json()["report"] == {"clips": 1}
+    assert status.json()["report"] == {
+        "clips": 1,
+        "timeline": {"states": {"original": 1}, "ranges": []},
+    }
 
 
 def test_start_conversion_expands_user_output_path(tmp_path: Path, monkeypatch) -> None:
@@ -162,3 +172,127 @@ def test_start_conversion_accepts_explicit_recovery_and_restore_modes(
     status = client.get(f"/get_job_status/{payload['job_id']}")
     assert status.status_code == 200
     assert status.json()["recovery_warnings"] == payload["recovery_warnings"]
+
+
+class FakeProvider:
+    id = "fake-provider"
+    label = "Fake Provider"
+    kind = ProviderKind.CLOUD
+    capabilities = (ProviderCapability.DENOISE,)
+
+    def info(self) -> ProviderInfo:
+        return ProviderInfo(
+            id=self.id,
+            label=self.label,
+            kind=self.kind,
+            capabilities=self.capabilities,
+        )
+
+    def health_check(self) -> ProviderHealth:
+        return ProviderHealth.available("fake provider ready")
+
+    def estimate(self, capability: ProviderCapability) -> ProviderEstimate:
+        return ProviderEstimate(
+            capability=capability,
+            cost="paid",
+            execution="cloud_api",
+            speed="unknown",
+        )
+
+
+def test_provider_list_endpoint_returns_provider_info_with_redacted_settings(
+    tmp_path: Path,
+) -> None:
+    store = ProviderSettingsStore(tmp_path / "providers.json")
+    store.configure("fake-provider", {"enabled": True, "api_key": "secret"})
+    registry = ProviderRegistry(settings_store=store, providers=(FakeProvider(),))
+    client = TestClient(create_app(provider_registry=registry))
+
+    response = client.get("/providers")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": "fake-provider",
+            "label": "Fake Provider",
+            "kind": "cloud",
+            "capabilities": ["denoise"],
+            "settings": {
+                "provider_id": "fake-provider",
+                "enabled": True,
+                "api_key_configured": True,
+                "api_key": None,
+                "base_url": None,
+                "executable_path": None,
+                "extra": {},
+            },
+        }
+    ]
+
+
+def test_provider_test_endpoint_returns_health(tmp_path: Path) -> None:
+    registry = ProviderRegistry(
+        settings_store=ProviderSettingsStore(tmp_path / "providers.json"),
+        providers=(FakeProvider(),),
+    )
+    client = TestClient(create_app(provider_registry=registry))
+
+    response = client.post("/providers/fake-provider/test")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "available",
+        "message": "fake provider ready",
+        "details": {},
+    }
+
+
+def test_provider_configure_endpoint_persists_secret_but_redacts_response(
+    tmp_path: Path,
+) -> None:
+    store = ProviderSettingsStore(tmp_path / "providers.json")
+    registry = ProviderRegistry(settings_store=store, providers=(FakeProvider(),))
+    client = TestClient(create_app(provider_registry=registry))
+
+    response = client.post(
+        "/providers/fake-provider/configure",
+        json={
+            "enabled": True,
+            "api_key": "new-secret",
+            "base_url": "https://provider.example",
+        },
+    )
+
+    assert response.status_code == 200
+    assert store.get("fake-provider").api_key == "new-secret"
+    assert response.json()["settings"] == {
+        "provider_id": "fake-provider",
+        "enabled": True,
+        "api_key_configured": True,
+        "api_key": None,
+        "base_url": "https://provider.example",
+        "executable_path": None,
+        "extra": {},
+    }
+
+
+def test_provider_configure_endpoint_can_clear_secrets_and_urls(
+    tmp_path: Path,
+) -> None:
+    store = ProviderSettingsStore(tmp_path / "providers.json")
+    store.configure(
+        "fake-provider",
+        {"enabled": True, "api_key": "old-secret", "base_url": "https://old.example"},
+    )
+    registry = ProviderRegistry(settings_store=store, providers=(FakeProvider(),))
+    client = TestClient(create_app(provider_registry=registry))
+
+    response = client.post(
+        "/providers/fake-provider/configure",
+        json={"api_key": None, "base_url": None},
+    )
+
+    assert response.status_code == 200
+    assert store.get("fake-provider").api_key is None
+    assert store.get("fake-provider").base_url is None
+    assert response.json()["settings"]["api_key_configured"] is False

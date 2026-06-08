@@ -13,7 +13,11 @@ def test_completed_job_contains_output_paths_and_report(tmp_path: Path) -> None:
         assert request.source_paths == [Path("/media/disc/VIDEO_TS/VTS_01_1.VOB")]
         return {
             "outputs": [output],
-            "report": {"repair": "none-needed", "frames_regenerated": 0},
+            "report": {
+                "repair": "none-needed",
+                "frames_regenerated": 0,
+                "timeline": {"states": {"original": 1}, "ranges": []},
+            },
             "warnings": [],
         }
 
@@ -31,7 +35,11 @@ def test_completed_job_contains_output_paths_and_report(tmp_path: Path) -> None:
     assert status.progress == 1.0
     assert status.stage == "completed"
     assert status.outputs == [output]
-    assert status.report == {"repair": "none-needed", "frames_regenerated": 0}
+    assert status.report == {
+        "repair": "none-needed",
+        "frames_regenerated": 0,
+        "timeline": {"states": {"original": 1}, "ranges": []},
+    }
 
 
 def test_failed_job_records_error_message(tmp_path: Path) -> None:
