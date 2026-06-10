@@ -7,8 +7,16 @@ from threading import Event, Lock, Thread
 from typing import Callable, Protocol
 from uuid import uuid4
 
-from rawcd.models import RecoveryMode, RestoreMode
+from rawcd.models import (
+    ExportProfile,
+    FrameState,
+    RecoveryMode,
+    RestoreLane,
+    RestoreMode,
+    RightsDeclaration,
+)
 from rawcd.recovery import DdrescueAdapter, RecoveryPlanner, RecoveryResult
+from rawcd.reports import write_home_report
 from rawcd.source import SourcePlan, create_source_plan
 
 
@@ -24,6 +32,18 @@ class JobStatus(str, Enum):
     CANCELED = "canceled"
 
 
+PreviewUpdateCallback = Callable[[int, float, str, Path | None], None]
+
+
+@dataclass
+class JobPreview:
+    job_id: str
+    current_frame: int = 0
+    current_timestamp: float = 0.0
+    current_operation: str = "Recovering original frame"
+    preview_image_path: Path | None = None
+
+
 @dataclass(frozen=True)
 class ConversionRequest:
     source_paths: list[Path]
@@ -32,6 +52,13 @@ class ConversionRequest:
     preserve_quality: bool = True
     recovery_mode: RecoveryMode = RecoveryMode.QUICK
     restore_mode: RestoreMode = RestoreMode.FAITHFUL
+    export_profile: ExportProfile = ExportProfile.HOME_MP4
+    lane: RestoreLane = RestoreLane.HOME
+    rights_declaration: RightsDeclaration | None = None
+    protected_media: bool = False
+    commercial_use: bool = False
+    extract_wav_audio: bool = False
+    preview_callback: PreviewUpdateCallback | None = None
 
     @property
     def source_plans(self) -> list[SourcePlan]:
@@ -53,6 +80,7 @@ class ConversionJob:
     recovery_warnings: list[str] = field(default_factory=list)
     report: dict = field(default_factory=dict)
     error: str | None = None
+    preview: JobPreview | None = None
 
 
 class Converter(Protocol):
@@ -81,7 +109,12 @@ class JobManager:
         self._lock = Lock()
 
     def create_pending_job(self, request: ConversionRequest) -> ConversionJob:
-        job = ConversionJob(job_id=uuid4().hex, request=request)
+        job_id = uuid4().hex
+        job = ConversionJob(
+            job_id=job_id,
+            request=request,
+            preview=JobPreview(job_id=job_id),
+        )
         with self._lock:
             self._jobs[job.job_id] = job
             self._cancel_events[job.job_id] = Event()
@@ -100,6 +133,13 @@ class JobManager:
             if job_id not in self._jobs:
                 raise KeyError(f"Unknown job id: {job_id}")
             return self._jobs[job_id]
+
+    def get_job_preview(self, job_id: str) -> JobPreview:
+        with self._lock:
+            if job_id not in self._jobs:
+                raise KeyError(f"Unknown job id: {job_id}")
+            job = self._jobs[job_id]
+            return job.preview or JobPreview(job_id=job_id)
 
     def cancel_job(self, job_id: str) -> bool:
         with self._lock:
@@ -126,6 +166,10 @@ class JobManager:
             job.status = JobStatus.RUNNING
             job.stage = "recovering"
             job.progress = 0.05
+            job.preview = JobPreview(
+                job_id=job.job_id,
+                current_operation="Recovering original frame",
+            )
 
         try:
             recovery_results = self._plan_recovery(job.request, event.is_set)
@@ -141,12 +185,17 @@ class JobManager:
                 job.warnings = list(recovery_warnings)
                 job.stage = "converting"
                 job.progress = 0.2
+                job.preview = JobPreview(
+                    job_id=job.job_id,
+                    current_operation="Exporting final video",
+                )
             recovered_request = replace(
                 job.request,
                 source_paths=[
                     recovery_result.source_path
                     for recovery_result in recovery_results
                 ],
+                preview_callback=self._preview_callback(job.job_id),
             )
             result = self._converter(recovered_request, event.is_set)
         except ConversionCanceled:
@@ -178,6 +227,9 @@ class JobManager:
             job.outputs = [Path(path) for path in result.get("outputs", [])]
             job.report = dict(result.get("report", {}))
             job.warnings = list(job.recovery_warnings) + list(result.get("warnings", []))
+            if job.request.lane is RestoreLane.HOME:
+                self._write_home_report(job)
+            job.preview = self._preview_from_report(job)
 
     def _plan_recovery(
         self,
@@ -198,3 +250,81 @@ class JobManager:
             if cancel_requested():
                 raise ConversionCanceled("conversion canceled")
         return results
+
+    def _preview_callback(self, job_id: str) -> PreviewUpdateCallback:
+        def update(
+            current_frame: int,
+            current_timestamp: float,
+            current_operation: str,
+            preview_image_path: Path | None = None,
+        ) -> None:
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if job is None or job.status is not JobStatus.RUNNING:
+                    return
+                job.preview = JobPreview(
+                    job_id=job_id,
+                    current_frame=max(0, current_frame),
+                    current_timestamp=max(0.0, current_timestamp),
+                    current_operation=current_operation,
+                    preview_image_path=preview_image_path,
+                )
+
+        return update
+
+    def _preview_from_report(self, job: ConversionJob) -> JobPreview:
+        timeline = job.report.get("timeline", {})
+        total_frames = 0
+        current_timestamp = 0.0
+        if isinstance(timeline, dict):
+            total_frames = int(timeline.get("total_frames") or 0)
+            current_timestamp = float(timeline.get("duration_seconds") or 0.0)
+        return JobPreview(
+            job_id=job.job_id,
+            current_frame=total_frames,
+            current_timestamp=current_timestamp,
+            current_operation="Exporting final video",
+        )
+
+    def _write_home_report(self, job: ConversionJob) -> None:
+        if not job.outputs:
+            return
+        report_path = _home_report_path(job.outputs[0])
+        timeline = job.report.get("timeline", {})
+        ranges = timeline.get("ranges", []) if isinstance(timeline, dict) else []
+        if not isinstance(ranges, list):
+            ranges = []
+        damaged_sections = [
+            item for item in ranges if _range_state(item) in {"damaged", "missing"}
+        ]
+        reconstructed_sections = [
+            item
+            for item in ranges
+            if _range_state(item) in {"interpolated", "generated", "enhanced"}
+        ]
+        skipped_sections = [item for item in ranges if _range_state(item) == "skipped"]
+        repair = job.report.get("repair", {})
+        provider_used = None
+        if isinstance(repair, dict):
+            provider_used = repair.get("tool") or repair.get("provider_id")
+        report = write_home_report(
+            report_path,
+            recovered_clips=int(job.report.get("clips", len(job.outputs)) or 0),
+            output_files=job.outputs,
+            damaged_sections=damaged_sections,
+            reconstructed_sections=reconstructed_sections,
+            skipped_sections=skipped_sections,
+            provider_used=str(provider_used) if provider_used else None,
+            warnings=job.warnings,
+        )
+        job.report["home_report"] = report
+
+
+def _home_report_path(output_path: Path) -> Path:
+    return output_path.with_suffix(".rawcd-home-report.json")
+
+
+def _range_state(item: object) -> str:
+    if not isinstance(item, dict):
+        return FrameState.ORIGINAL.value
+    return str(item.get("state", FrameState.ORIGINAL.value))

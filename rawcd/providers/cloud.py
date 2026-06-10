@@ -49,9 +49,13 @@ class CloudApiProvider:
             return ProviderHealth.unavailable(
                 "Cloud/API provider base URL is not configured.",
             )
-        return ProviderHealth.available(
-            "Cloud/API provider credentials are configured.",
-            details={"base_url": self._base_url},
+        return ProviderHealth.degraded(
+            "Cloud/API provider credentials are configured locally, "
+            "but authentication has not been verified.",
+            details={
+                "base_url": self._base_url,
+                "authentication": "not_verified",
+            },
         )
 
     def estimate(self, capability: ProviderCapability) -> ProviderEstimate:

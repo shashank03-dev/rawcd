@@ -28,9 +28,15 @@ def test_cloud_api_provider_exposes_configured_capability_options() -> None:
         "capabilities": ["inpainting", "upscale"],
     }
     assert provider.health_check().to_dict() == {
-        "status": "available",
-        "message": "Cloud/API provider credentials are configured.",
-        "details": {"base_url": "https://provider.example"},
+        "status": "degraded",
+        "message": (
+            "Cloud/API provider credentials are configured locally, "
+            "but authentication has not been verified."
+        ),
+        "details": {
+            "base_url": "https://provider.example",
+            "authentication": "not_verified",
+        },
     }
     assert provider.estimate(ProviderCapability.UPSCALE).to_dict() == {
         "capability": "upscale",

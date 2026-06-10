@@ -81,17 +81,15 @@ class OllamaProvider:
 
     def health_check(self) -> ProviderHealth:
         try:
-            payload = self._fetch_tags()
+            models = self.list_models()
         except Exception as exc:
             return ProviderHealth.unavailable(
                 f"Ollama API is unavailable: {exc}",
             )
 
-        models = payload.get("models", [])
-        model_count = len(models) if isinstance(models, list) else 0
         return ProviderHealth.available(
             "Ollama API is available.",
-            details={"models": str(model_count)},
+            details={"models": str(len(models))},
         )
 
     def list_models(self) -> tuple[OllamaModelInfo, ...]:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import datetime, timezone
 from enum import Enum
 from math import isfinite
 from pathlib import Path
@@ -26,6 +27,13 @@ class RecoverySeverity(str, Enum):
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
+
+
+class ProVerificationStatus(str, Enum):
+    NOT_REQUESTED = "not_requested"
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
 
 
 class SourceState(str, Enum):
@@ -70,6 +78,28 @@ class ExportProfile(str, Enum):
     PRORES_422_HQ = "prores_422_hq"
     DNXHR_HQX = "dnxhr_hqx"
     FFV1_MKV = "ffv1_mkv"
+
+
+@dataclass(frozen=True)
+class ProProfile:
+    name: str
+    organization: str
+    email: str
+    country: str
+    intended_use: str
+    verification_status: ProVerificationStatus = ProVerificationStatus.NOT_REQUESTED
+    approved_at: datetime | None = None
+    server_verification_id: str | None = None
+
+
+@dataclass(frozen=True)
+class RightsDeclaration:
+    project_name: str
+    organization: str
+    source_title: str
+    rights_basis: str
+    permission_reference: str
+    declared_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(frozen=True)
@@ -148,10 +178,13 @@ __all__ = [
     "FrameTimeline",
     "ProviderCapability",
     "ProviderKind",
+    "ProProfile",
+    "ProVerificationStatus",
     "RecoveryAttempt",
     "RecoveryMode",
     "RecoveryResult",
     "RecoverySeverity",
+    "RightsDeclaration",
     "RestoreLane",
     "RestoreMode",
     "RestoreReport",

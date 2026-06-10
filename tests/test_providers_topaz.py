@@ -24,6 +24,16 @@ class FakeCommandRunner:
         return self.result
 
 
+class FakeSequenceCommandRunner:
+    def __init__(self, results: list[CompletedProcess[str]]) -> None:
+        self.results = list(results)
+        self.commands: list[list[str]] = []
+
+    def run(self, command: list[str]) -> CompletedProcess[str]:
+        self.commands.append(command)
+        return self.results.pop(0)
+
+
 class TimeoutCommandRunner:
     def run(self, command: list[str]) -> CompletedProcess[str]:
         raise TimeoutExpired(command, timeout=10)
@@ -64,7 +74,7 @@ def test_topaz_cli_reports_license_required_when_not_installed() -> None:
     assert provider.capabilities == ()
 
 
-def test_topaz_cli_reports_available_and_exposes_supported_capabilities() -> None:
+def test_topaz_cli_reports_available_and_exposes_configured_supported_capabilities() -> None:
     cli_path = Path("/usr/local/bin/topaz-video-ai")
     runner = FakeCommandRunner(
         CompletedProcess(
@@ -78,6 +88,10 @@ def test_topaz_cli_reports_available_and_exposes_supported_capabilities() -> Non
         cli_path=cli_path,
         exists=FakeExists({cli_path}),
         runner=runner,
+        supported_capabilities=(
+            ProviderCapability.INTERPOLATION,
+            ProviderCapability.UPSCALE,
+        ),
     )
 
     health = provider.health_check()
@@ -87,11 +101,44 @@ def test_topaz_cli_reports_available_and_exposes_supported_capabilities() -> Non
     assert provider.capabilities == (
         ProviderCapability.INTERPOLATION,
         ProviderCapability.UPSCALE,
-        ProviderCapability.STABILIZATION,
-        ProviderCapability.ARTIFACT_CLEANUP,
-        ProviderCapability.DENOISE,
-        ProviderCapability.DEINTERLACE,
     )
+
+
+def test_topaz_cli_detects_supported_capabilities_from_help_output() -> None:
+    cli_path = Path("/usr/local/bin/topaz-video-ai")
+    runner = FakeSequenceCommandRunner(
+        [
+            CompletedProcess(
+                [str(cli_path), "--version"],
+                0,
+                stdout="Topaz Video AI CLI 5.0",
+                stderr="",
+            ),
+            CompletedProcess(
+                [str(cli_path), "--help"],
+                0,
+                stdout="Usage: topaz-video-ai --input --output --upscale --denoise",
+                stderr="",
+            ),
+        ]
+    )
+    provider = TopazCliProvider(
+        cli_path=cli_path,
+        exists=FakeExists({cli_path}),
+        runner=runner,
+    )
+
+    health = provider.health_check()
+
+    assert health.status is ProviderHealthStatus.AVAILABLE
+    assert provider.capabilities == (
+        ProviderCapability.UPSCALE,
+        ProviderCapability.DENOISE,
+    )
+    assert runner.commands == [
+        [str(cli_path), "--version"],
+        [str(cli_path), "--help"],
+    ]
 
 
 def test_topaz_cli_reports_license_required_when_not_authenticated() -> None:
@@ -134,6 +181,7 @@ def test_topaz_cli_builds_capability_command_without_running_cli() -> None:
     provider = TopazCliProvider(
         cli_path=cli_path,
         exists=FakeExists({cli_path}),
+        supported_capabilities=(ProviderCapability.UPSCALE,),
     )
 
     command = provider.build_enhancement_command(
@@ -157,7 +205,9 @@ def test_topaz_api_provider_is_separate_api_key_mode() -> None:
 
     assert provider.id == "topaz-api"
     assert provider.kind is ProviderKind.TOPAZ
-    assert provider.health_check().status is ProviderHealthStatus.AVAILABLE
+    health = provider.health_check()
+    assert health.status is ProviderHealthStatus.DEGRADED
+    assert "not been verified" in health.message
     assert provider.estimate(ProviderCapability.DENOISE).to_dict() == {
         "capability": "denoise",
         "cost": "paid",

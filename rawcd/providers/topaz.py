@@ -53,6 +53,27 @@ _CAPABILITY_FLAGS = {
     ProviderCapability.DEINTERLACE: "--deinterlace",
 }
 
+_CAPABILITY_MARKERS = {
+    ProviderCapability.INTERPOLATION: (
+        "--interpolate",
+        "interpolation",
+        "frame interpolation",
+    ),
+    ProviderCapability.UPSCALE: ("--upscale", "upscale", "upscaling"),
+    ProviderCapability.STABILIZATION: (
+        "--stabilize",
+        "stabilization",
+        "stabilize",
+    ),
+    ProviderCapability.ARTIFACT_CLEANUP: (
+        "--artifact-cleanup",
+        "artifact cleanup",
+        "artifact removal",
+    ),
+    ProviderCapability.DENOISE: ("--denoise", "denoise", "noise reduction"),
+    ProviderCapability.DEINTERLACE: ("--deinterlace", "deinterlace"),
+}
+
 
 class TopazCliProvider:
     id = "topaz-cli"
@@ -72,14 +93,16 @@ class TopazCliProvider:
         self._exists = exists or Path.exists
         self._runner = runner or SubprocessCommandRunner()
         self._supported_capabilities = supported_capabilities
+        self._detected_capabilities: tuple[ProviderCapability, ...] | None = None
 
     @property
     def capabilities(self) -> tuple[ProviderCapability, ...]:
-        if self.detect_cli_path() is None:
+        cli_path = self.detect_cli_path()
+        if cli_path is None:
             return ()
         if self._supported_capabilities is not None:
             return tuple(ProviderCapability(cap) for cap in self._supported_capabilities)
-        return TOPAZ_CLI_CAPABILITIES
+        return self._detect_supported_capabilities(cli_path)
 
     def info(self) -> ProviderInfo:
         return ProviderInfo(
@@ -180,6 +203,27 @@ class TopazCliProvider:
             _CAPABILITY_FLAGS[capability],
         ]
 
+    def _detect_supported_capabilities(
+        self,
+        cli_path: Path,
+    ) -> tuple[ProviderCapability, ...]:
+        if self._detected_capabilities is not None:
+            return self._detected_capabilities
+
+        try:
+            result = self._runner.run([str(cli_path), "--help"])
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            self._detected_capabilities = ()
+            return self._detected_capabilities
+
+        if result.returncode != 0:
+            self._detected_capabilities = ()
+            return self._detected_capabilities
+
+        output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+        self._detected_capabilities = _capabilities_from_probe_output(output)
+        return self._detected_capabilities
+
 
 class TopazApiProvider:
     id = "topaz-api"
@@ -203,7 +247,10 @@ class TopazApiProvider:
             return ProviderHealth.license_required(
                 "Topaz API key is not configured.",
             )
-        return ProviderHealth.available("Topaz API credentials are configured.")
+        return ProviderHealth.degraded(
+            "Topaz API key is configured locally, but authentication has not been verified.",
+            details={"authentication": "not_verified"},
+        )
 
     def estimate(self, capability: ProviderCapability) -> ProviderEstimate:
         capability = ProviderCapability(capability)
@@ -228,6 +275,18 @@ def _looks_like_auth_failure(output: str) -> bool:
         "login required",
     )
     return any(marker in output for marker in markers)
+
+
+def _capabilities_from_probe_output(
+    output: str,
+) -> tuple[ProviderCapability, ...]:
+    lowered = output.lower()
+    capabilities: list[ProviderCapability] = []
+    for capability in TOPAZ_CLI_CAPABILITIES:
+        markers = _CAPABILITY_MARKERS[capability]
+        if any(marker in lowered for marker in markers):
+            capabilities.append(capability)
+    return tuple(capabilities)
 
 
 __all__ = [

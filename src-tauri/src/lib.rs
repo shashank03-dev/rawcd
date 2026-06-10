@@ -141,6 +141,18 @@ struct StartConversionRequest {
     recovery_mode: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     restore_mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    export_profile: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rights_declaration: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    protected_media: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    commercial_use: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extract_wav_audio: Option<bool>,
 }
 
 #[tauri::command]
@@ -170,6 +182,11 @@ async fn get_job_status(state: State<'_, EngineState>, job_id: String) -> Result
 }
 
 #[tauri::command]
+async fn get_job_preview(state: State<'_, EngineState>, job_id: String) -> Result<Value, String> {
+    state.get_json(&format!("/get_job_preview/{job_id}")).await
+}
+
+#[tauri::command]
 async fn cancel_job(state: State<'_, EngineState>, job_id: String) -> Result<Value, String> {
     state.post_json(&format!("/cancel_job/{job_id}"), &serde_json::json!({}))
         .await
@@ -196,6 +213,31 @@ async fn configure_provider(
     state
         .post_json(&format!("/providers/{provider_id}/configure"), &request)
         .await
+}
+
+#[tauri::command]
+async fn get_pro_profile(state: State<'_, EngineState>) -> Result<Value, String> {
+    state.get_json("/pro/profile").await
+}
+
+#[tauri::command]
+async fn save_pro_profile(state: State<'_, EngineState>, request: Value) -> Result<Value, String> {
+    state.post_json("/pro/profile", &request).await
+}
+
+#[tauri::command]
+async fn validate_rights(state: State<'_, EngineState>, request: Value) -> Result<Value, String> {
+    state.post_json("/rights/validate", &request).await
+}
+
+#[tauri::command]
+async fn write_home_report(state: State<'_, EngineState>, request: Value) -> Result<Value, String> {
+    state.post_json("/reports/home", &request).await
+}
+
+#[tauri::command]
+async fn write_pro_report(state: State<'_, EngineState>, request: Value) -> Result<Value, String> {
+    state.post_json("/reports/pro", &request).await
 }
 
 #[derive(Serialize)]
@@ -230,10 +272,16 @@ pub fn run() {
             inspect_disc,
             start_conversion,
             get_job_status,
+            get_job_preview,
             cancel_job,
             list_providers,
             test_provider,
             configure_provider,
+            get_pro_profile,
+            save_pro_profile,
+            validate_rights,
+            write_home_report,
+            write_pro_report,
             open_output_folder
         ])
         .run(tauri::generate_context!())
@@ -274,6 +322,18 @@ mod tests {
             preserve_quality: true,
             recovery_mode: Some("maximum".to_string()),
             restore_mode: Some("enhanced".to_string()),
+            export_profile: Some("prores_422_hq".to_string()),
+            lane: Some("pro".to_string()),
+            rights_declaration: Some(json!({
+                "project_name": "Restored Feature",
+                "organization": "Archive House",
+                "source_title": "Original Camera DVD",
+                "rights_basis": "rights_holder",
+                "permission_reference": "contract-2026-001"
+            })),
+            protected_media: Some(true),
+            commercial_use: Some(true),
+            extract_wav_audio: Some(true),
         };
 
         assert_eq!(
@@ -284,7 +344,19 @@ mod tests {
                 "ai_repair": false,
                 "preserve_quality": true,
                 "recovery_mode": "maximum",
-                "restore_mode": "enhanced"
+                "restore_mode": "enhanced",
+                "export_profile": "prores_422_hq",
+                "lane": "pro",
+                "rights_declaration": {
+                    "project_name": "Restored Feature",
+                    "organization": "Archive House",
+                    "source_title": "Original Camera DVD",
+                    "rights_basis": "rights_holder",
+                    "permission_reference": "contract-2026-001"
+                },
+                "protected_media": true,
+                "commercial_use": true,
+                "extract_wav_audio": true
             })
         );
     }
@@ -298,6 +370,12 @@ mod tests {
             preserve_quality: true,
             recovery_mode: None,
             restore_mode: None,
+            export_profile: None,
+            lane: None,
+            rights_declaration: None,
+            protected_media: None,
+            commercial_use: None,
+            extract_wav_audio: None,
         };
 
         assert_eq!(

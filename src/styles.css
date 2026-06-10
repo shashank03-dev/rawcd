@@ -32,7 +32,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -41,13 +42,15 @@ button {
 }
 
 button:disabled,
-input:disabled {
+input:disabled,
+select:disabled {
   cursor: not-allowed;
   opacity: 0.52;
 }
 
 button:focus-visible,
 input:focus-visible,
+select:focus-visible,
 summary:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
@@ -275,6 +278,15 @@ h2 {
   padding: 8px 10px;
 }
 
+.field select {
+  width: 100%;
+  min-height: 40px;
+  border: 2px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
 .field input::placeholder {
   color: oklch(0.42 0.020 155);
 }
@@ -339,6 +351,169 @@ h2 {
   margin-top: 18px;
 }
 
+.lane-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.lane-option,
+.mode-option {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 2px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.lane-option {
+  min-height: 76px;
+  padding: 12px;
+}
+
+.lane-option input,
+.mode-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lane-option.active,
+.mode-option.active {
+  border-color: var(--primary);
+  background: oklch(0.94 0.050 140);
+}
+
+.lane-option small {
+  color: var(--muted);
+  font-weight: 750;
+}
+
+.restore-controls,
+.pro-workflow,
+.preview-panel,
+.report-panel {
+  margin-top: 18px;
+  border-top: 2px solid var(--line);
+  padding-top: 14px;
+}
+
+.restore-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.control-group {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.control-label {
+  color: var(--primary-dark);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.mode-option {
+  min-height: 42px;
+  align-items: center;
+  justify-items: center;
+  padding: 8px;
+  text-align: center;
+}
+
+.mode-option span {
+  overflow-wrap: anywhere;
+}
+
+.pro-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+}
+
+.pro-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.pro-locked {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.provider-routing {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.pro-wav {
+  margin: 10px 0 0;
+}
+
+.provider-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.provider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 96px;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.provider-row .check-row {
+  margin: 0;
+}
+
+.provider-row small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.provider-empty {
+  margin-top: 10px;
+}
+
+.provider-routing span,
+.provider-routing small {
+  color: var(--muted);
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
 .advanced {
   border-bottom: 2px solid var(--line);
   padding-bottom: 12px;
@@ -397,6 +572,148 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.preview-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.preview-stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.preview-stage strong {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.preview-meta {
+  display: flex;
+  gap: 8px;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.preview-frame {
+  display: grid;
+  place-items: center;
+  min-height: 180px;
+  aspect-ratio: 16 / 9;
+  border: 2px solid var(--ink);
+  background:
+    linear-gradient(90deg, oklch(0.20 0.015 155) 0 2px, transparent 2px),
+    linear-gradient(0deg, oklch(0.20 0.015 155) 0 2px, transparent 2px),
+    oklch(0.12 0.014 155);
+  background-size: 28px 28px;
+  color: oklch(0.86 0.055 145);
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 900;
+  overflow: hidden;
+}
+
+.preview-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: oklch(0.12 0.014 155);
+}
+
+.timeline-strip {
+  position: relative;
+  height: 18px;
+  overflow: hidden;
+  border: 2px solid var(--ink);
+  background: oklch(0.90 0.015 155);
+}
+
+.timeline-empty {
+  display: block;
+  height: 100%;
+  background: oklch(0.88 0.020 155);
+}
+
+.timeline-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 4px;
+}
+
+.state-original {
+  background: oklch(0.68 0.090 145);
+}
+
+.state-damaged,
+.state-missing {
+  background: var(--danger);
+}
+
+.state-interpolated {
+  background: var(--info);
+}
+
+.state-generated {
+  background: var(--accent);
+}
+
+.state-enhanced {
+  background: oklch(0.58 0.130 290);
+}
+
+.state-skipped {
+  background: oklch(0.38 0.025 155);
+}
+
+.report-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.report-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 160px);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.report-card strong,
+.report-card small {
+  display: block;
+}
+
+.report-card small {
+  margin-top: 3px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.report-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 7px 0;
+}
+
+.report-summary span {
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 850;
+}
+
 .log-list {
   display: flex;
   flex-direction: column;
@@ -436,8 +753,21 @@ h2 {
 
   .topbar,
   .workspace,
-  .actions {
+  .actions,
+  .lane-switch,
+  .restore-controls,
+  .pro-grid,
+  .pro-actions,
+  .provider-routing,
+  .provider-row,
+  .preview-stage,
+  .report-card {
     grid-template-columns: 1fr;
+  }
+
+  .preview-meta {
+    justify-content: space-between;
+    white-space: normal;
   }
 
   .source-rail,

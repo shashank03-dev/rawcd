@@ -3,16 +3,24 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from rawcd.models import ProviderKind
+from rawcd.models import (
+    ProProfile,
+    ProviderCapability,
+    ProviderKind,
+    ProVerificationStatus,
+)
 from rawcd.providers.base import EnhancementProvider, ProviderHealth
 from rawcd.providers.cloud import CloudApiProvider
 from rawcd.providers.local import LocalFfmpegProvider
 from rawcd.providers.ollama import OllamaProvider
 from rawcd.providers.topaz import TopazApiProvider, TopazCliProvider
 from rawcd.repair_pipeline import RepairProvider
+
+_REPAIR_CAPABILITY_VALUES = frozenset({"interpolation", "inpainting"})
 
 
 @dataclass(frozen=True)
@@ -33,10 +41,7 @@ class ProviderSettingsStore:
         return self.all().get(provider_id, ProviderSettings(provider_id=provider_id))
 
     def all(self) -> dict[str, ProviderSettings]:
-        if not self.path.exists():
-            return {}
-        with self.path.open("r", encoding="utf-8") as settings_file:
-            payload = json.load(settings_file)
+        payload = _read_settings_payload(self.path)
         providers = payload.get("providers", {})
         return {
             provider_id: ProviderSettings(
@@ -66,24 +71,36 @@ class ProviderSettingsStore:
         return configured
 
     def _write(self, settings: dict[str, ProviderSettings]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = _read_settings_payload(self.path)
         payload = {
+            **payload,
             "providers": {
                 provider_id: asdict(provider_settings)
                 for provider_id, provider_settings in sorted(settings.items())
-            }
+            },
         }
-        temp_path = self.path.with_name(f".{self.path.name}.tmp")
-        fd = os.open(
-            temp_path,
-            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-            0o600,
-        )
-        with os.fdopen(fd, "w", encoding="utf-8") as settings_file:
-            json.dump(payload, settings_file, indent=2, sort_keys=True)
-            settings_file.write("\n")
-        os.replace(temp_path, self.path)
-        os.chmod(self.path, 0o600)
+        _write_settings_payload(self.path, payload)
+
+
+class ProProfileSettingsStore:
+    def __init__(self, path: Path | None = None) -> None:
+        self.path = path or default_settings_path()
+
+    def get(self) -> ProProfile | None:
+        payload = _read_settings_payload(self.path)
+        profile = payload.get("pro_profile")
+        if not isinstance(profile, dict):
+            return None
+        return _pro_profile_from_settings(profile)
+
+    def save(self, profile: ProProfile) -> ProProfile:
+        payload = _read_settings_payload(self.path)
+        payload["pro_profile"] = _pro_profile_to_settings(profile)
+        _write_settings_payload(self.path, payload)
+        return profile
+
+    def can_enable_pro_projects(self) -> bool:
+        return pro_projects_enabled(self.get())
 
 
 class ProviderRegistry:
@@ -93,10 +110,11 @@ class ProviderRegistry:
         providers: Iterable[EnhancementProvider] | None = None,
     ) -> None:
         self.settings_store = settings_store or ProviderSettingsStore()
+        self._uses_default_provider_map = providers is None
         self._providers = (
-            {provider.id: provider for provider in providers}
-            if providers is not None
-            else None
+            _default_provider_map(self.settings_store)
+            if providers is None
+            else {provider.id: provider for provider in providers}
         )
 
     def list_providers(self) -> list[dict[str, Any]]:
@@ -115,26 +133,15 @@ class ProviderRegistry:
     ) -> dict[str, Any]:
         self._require_provider(provider_id)
         self.settings_store.configure(provider_id, updates)
+        if self._uses_default_provider_map:
+            self._providers = _default_provider_map(self.settings_store)
         return self._serialize_provider(self._require_provider(provider_id))
 
     def repair_providers(self) -> tuple[RepairProvider, ...]:
-        repair_capabilities = {
-            "interpolation",
-            "inpainting",
-        }
-        providers: list[RepairProvider] = []
-        for provider in self._provider_map().values():
-            settings = self.settings_store.get(provider.id)
-            if not settings.enabled:
-                continue
-            capabilities = frozenset(
-                capability
-                for capability in provider.capabilities
-                if capability.value in repair_capabilities
-            )
-            if capabilities:
-                providers.append(RepairProvider(id=provider.id, capabilities=capabilities))
-        return tuple(providers)
+        return tuple(
+            _RegistryRepairProvider(self, provider.id)
+            for provider in self._provider_map().values()
+        )
 
     def _serialize_provider(self, provider: EnhancementProvider) -> dict[str, Any]:
         info = (
@@ -162,9 +169,27 @@ class ProviderRegistry:
             raise KeyError(f"Unknown provider id: {provider_id}") from exc
 
     def _provider_map(self) -> dict[str, EnhancementProvider]:
-        if self._providers is not None:
-            return self._providers
-        return _default_provider_map(self.settings_store)
+        return self._providers
+
+
+class _RegistryRepairProvider:
+    def __init__(self, registry: ProviderRegistry, provider_id: str) -> None:
+        self._registry = registry
+        self.id = provider_id
+
+    @property
+    def capabilities(self) -> frozenset[ProviderCapability]:
+        settings = self._registry.settings_store.get(self.id)
+        if not settings.enabled:
+            return frozenset()
+        provider = self._registry._provider_map().get(self.id)
+        if provider is None:
+            return frozenset()
+        return frozenset(
+            capability
+            for capability in provider.capabilities
+            if capability.value in _REPAIR_CAPABILITY_VALUES
+        )
 
 
 def default_settings_path() -> Path:
@@ -174,6 +199,87 @@ def default_settings_path() -> Path:
     else:
         root = Path.home() / ".config"
     return root / "rawcd" / "providers.json"
+
+
+def pro_projects_enabled(profile: ProProfile | None) -> bool:
+    return (
+        profile is not None
+        and profile.verification_status is ProVerificationStatus.APPROVED
+    )
+
+
+def _read_settings_payload(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    with path.open("r", encoding="utf-8") as settings_file:
+        payload = json.load(settings_file)
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_settings_payload(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    fd = os.open(
+        temp_path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        0o600,
+    )
+    with os.fdopen(fd, "w", encoding="utf-8") as settings_file:
+        json.dump(payload, settings_file, indent=2, sort_keys=True)
+        settings_file.write("\n")
+    os.replace(temp_path, path)
+    os.chmod(path, 0o600)
+
+
+def _pro_profile_to_settings(profile: ProProfile) -> dict[str, Any]:
+    return {
+        "name": profile.name,
+        "organization": profile.organization,
+        "email": profile.email,
+        "country": profile.country,
+        "intended_use": profile.intended_use,
+        "verification_status": profile.verification_status.value,
+        "approved_at": _datetime_to_settings(profile.approved_at),
+        "server_verification_id": profile.server_verification_id,
+    }
+
+
+def _pro_profile_from_settings(data: dict[str, Any]) -> ProProfile:
+    try:
+        status = ProVerificationStatus(
+            data.get(
+                "verification_status",
+                ProVerificationStatus.NOT_REQUESTED.value,
+            )
+        )
+    except ValueError:
+        status = ProVerificationStatus.NOT_REQUESTED
+
+    return ProProfile(
+        name=str(data.get("name", "")),
+        organization=str(data.get("organization", "")),
+        email=str(data.get("email", "")),
+        country=str(data.get("country", "")),
+        intended_use=str(data.get("intended_use", "")),
+        verification_status=status,
+        approved_at=_datetime_from_settings(data.get("approved_at")),
+        server_verification_id=data.get("server_verification_id"),
+    )
+
+
+def _datetime_to_settings(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _datetime_from_settings(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _default_provider_map(
@@ -188,18 +294,48 @@ def _default_provider_map(
         if topaz_cli_settings.executable_path
         else None
     )
+    topaz_cli_capabilities = _configured_capabilities(
+        topaz_cli_settings.extra.get("supported_capabilities")
+    )
+    cloud_capabilities = _configured_capabilities(
+        cloud_api_settings.extra.get("supported_capabilities")
+    )
+    cloud_kwargs: dict[str, Any] = {}
+    if cloud_capabilities is not None:
+        cloud_kwargs["capabilities"] = cloud_capabilities
 
     providers: tuple[EnhancementProvider, ...] = (
         LocalFfmpegProvider(),
         OllamaProvider(base_url=ollama_settings.base_url or "http://127.0.0.1:11434"),
-        TopazCliProvider(cli_path=topaz_cli_path),
+        TopazCliProvider(
+            cli_path=topaz_cli_path,
+            supported_capabilities=topaz_cli_capabilities,
+        ),
         TopazApiProvider(api_key=topaz_api_settings.api_key),
         CloudApiProvider(
             api_key=cloud_api_settings.api_key,
             base_url=cloud_api_settings.base_url,
+            **cloud_kwargs,
         ),
     )
     return {provider.id: provider for provider in providers}
+
+
+def _configured_capabilities(value: Any) -> tuple[ProviderCapability, ...] | None:
+    if value is None:
+        return None
+    if not isinstance(value, list | tuple):
+        return ()
+
+    capabilities: list[ProviderCapability] = []
+    for item in value:
+        try:
+            capability = ProviderCapability(item)
+        except ValueError:
+            continue
+        if capability not in capabilities:
+            capabilities.append(capability)
+    return tuple(capabilities)
 
 
 def redact_provider_settings(settings: ProviderSettings) -> dict[str, Any]:
@@ -231,9 +367,11 @@ def _is_secret_key(key: object) -> bool:
 
 
 __all__ = [
+    "ProProfileSettingsStore",
     "ProviderRegistry",
     "ProviderSettings",
     "ProviderSettingsStore",
     "default_settings_path",
+    "pro_projects_enabled",
     "redact_provider_settings",
 ]

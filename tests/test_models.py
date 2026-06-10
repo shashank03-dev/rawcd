@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from datetime import datetime, timezone
 from math import inf
 from pathlib import Path
 
@@ -11,8 +12,11 @@ from rawcd.models import (
     FrameTimeline,
     ProviderCapability,
     ProviderKind,
+    ProProfile,
+    ProVerificationStatus,
     RecoverySeverity,
     RecoveryMode,
+    RightsDeclaration,
     RestoreLane,
     RestoreMode,
     RestoreReport,
@@ -31,6 +35,15 @@ def test_restore_mode_enum_values_are_stable_api_strings() -> None:
     assert RecoverySeverity.INFO.value == "info"
     assert RecoverySeverity.WARNING.value == "warning"
     assert RecoverySeverity.ERROR.value == "error"
+
+
+def test_pro_verification_status_values_are_stable_api_strings() -> None:
+    assert [status.value for status in ProVerificationStatus] == [
+        "not_requested",
+        "pending",
+        "approved",
+        "rejected",
+    ]
 
 
 def test_source_state_enum_values_are_stable_api_strings() -> None:
@@ -94,6 +107,54 @@ def test_restore_source_captures_path_state_and_recovery_mode() -> None:
     assert source.state is SourceState.MOUNTED
     assert source.label == "VIDEO_TS"
     assert source.recovery_mode is RecoveryMode.MAXIMUM
+
+
+def test_pro_profile_captures_local_verification_metadata() -> None:
+    approved_at = datetime(2026, 6, 7, 12, 30, tzinfo=timezone.utc)
+
+    profile = ProProfile(
+        name="Asha Rao",
+        organization="Archive House",
+        email="asha@example.test",
+        country="IN",
+        intended_use="Commercial film restoration",
+        verification_status=ProVerificationStatus.APPROVED,
+        approved_at=approved_at,
+        server_verification_id="future-server-check-123",
+    )
+
+    assert asdict(profile) == {
+        "name": "Asha Rao",
+        "organization": "Archive House",
+        "email": "asha@example.test",
+        "country": "IN",
+        "intended_use": "Commercial film restoration",
+        "verification_status": ProVerificationStatus.APPROVED,
+        "approved_at": approved_at,
+        "server_verification_id": "future-server-check-123",
+    }
+
+
+def test_rights_declaration_captures_project_and_source_metadata() -> None:
+    declared_at = datetime(2026, 6, 7, 13, 0, tzinfo=timezone.utc)
+
+    declaration = RightsDeclaration(
+        project_name="Restored Feature",
+        organization="Archive House",
+        source_title="Original Camera DVD",
+        rights_basis="rights_holder",
+        permission_reference="contract-2026-001",
+        declared_at=declared_at,
+    )
+
+    assert asdict(declaration) == {
+        "project_name": "Restored Feature",
+        "organization": "Archive House",
+        "source_title": "Original Camera DVD",
+        "rights_basis": "rights_holder",
+        "permission_reference": "contract-2026-001",
+        "declared_at": declared_at,
+    }
 
 
 def test_frame_range_rejects_negative_duration() -> None:

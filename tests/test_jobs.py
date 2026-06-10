@@ -35,11 +35,52 @@ def test_completed_job_contains_output_paths_and_report(tmp_path: Path) -> None:
     assert status.progress == 1.0
     assert status.stage == "completed"
     assert status.outputs == [output]
-    assert status.report == {
-        "repair": "none-needed",
-        "frames_regenerated": 0,
-        "timeline": {"states": {"original": 1}, "ranges": []},
-    }
+    assert status.report["repair"] == "none-needed"
+    assert status.report["frames_regenerated"] == 0
+    assert status.report["timeline"] == {"states": {"original": 1}, "ranges": []}
+    assert status.report["home_report"]["json_save_path"] == str(
+        tmp_path / "clip.rawcd-home-report.json"
+    )
+    assert Path(status.report["home_report"]["json_save_path"]).exists()
+    preview = manager.get_job_preview(job.job_id)
+    assert preview.current_operation == "Exporting final video"
+    assert preview.current_frame == 0
+    assert preview.current_timestamp == 0.0
+    assert preview.preview_image_path is None
+
+
+def test_running_job_preview_reports_recovery_operation(tmp_path: Path) -> None:
+    recovery_started = Event()
+    release_recovery = Event()
+
+    class BlockingRecoveryPlanner:
+        def plan(self, source_path: Path, output_dir: Path, mode: RecoveryMode):
+            recovery_started.set()
+            release_recovery.wait(timeout=5)
+            from rawcd.models import RecoveryResult
+
+            return RecoveryResult(
+                input_path=source_path,
+                mode=mode,
+                source_path=source_path,
+            )
+
+    manager = JobManager(
+        converter=lambda *_: {"outputs": [], "report": {}, "warnings": []},
+        recovery_planner=BlockingRecoveryPlanner(),
+    )
+    job = manager.start_conversion(
+        ConversionRequest(source_paths=[Path("/media/disc/clip.vob")], output_dir=tmp_path)
+    )
+    assert recovery_started.wait(timeout=5)
+
+    preview = manager.get_job_preview(job.job_id)
+
+    assert preview.current_operation == "Recovering original frame"
+    assert preview.current_frame == 0
+    assert preview.current_timestamp == 0.0
+    assert preview.preview_image_path is None
+    release_recovery.set()
 
 
 def test_failed_job_records_error_message(tmp_path: Path) -> None:

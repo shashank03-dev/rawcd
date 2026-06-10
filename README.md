@@ -5,7 +5,7 @@
 <h1 align="center">RawCD</h1>
 
 <p align="center">
-  A Linux-first restoration desk for converting personal, unprotected CD/DVD video media into MP4 files.
+  A Linux-first restoration desk for recovering personal CD/DVD video media with Home and Pro restore workflows.
 </p>
 
 <p align="center">
@@ -17,9 +17,16 @@
 
 ## What RawCD Does
 
-RawCD turns a USB CD/DVD drive and a personal disc archive into a local conversion workflow. It inspects the mounted disc, identifies playable clips, converts each source to MP4, and records what repair work was attempted.
+RawCD turns a USB CD/DVD drive and a personal disc archive into a local restoration workflow. It inspects mounted media, identifies playable clips, tracks recovery and frame-damage state, exports restored video, and writes reports that describe the restoration decisions.
 
-It is intentionally scoped to personal, unprotected media. RawCD does not bypass DVD encryption, copy protection, or access controls.
+RawCD has two lanes:
+
+| Lane | Intended use |
+| --- | --- |
+| Home Restore | Personal, unprotected media with MP4 output and a local restoration report. |
+| Studio / Pro | Approved rights-holder projects with rights declarations, archival export profiles, WAV sidecars, provider routing, and Pro audit reports. |
+
+RawCD does not bypass DVD encryption, copy protection, region controls, DRM, or access controls.
 
 ## Interface Direction
 
@@ -29,8 +36,10 @@ RawCD uses a typographic restoration-lab design: pure white workspace, moss-gree
 | --- | --- |
 | Source proof | Scan Linux optical drives and inspect mounted media paths. |
 | Clip ledger | Review detected video sources before conversion. |
-| Repair controls | Enable AI repair and preserve-quality output settings. |
-| Engine ledger | Track scan, inspection, conversion, warnings, and output paths. |
+| Restore controls | Choose Quick or Maximum Recovery and Faithful or Enhanced Restore. |
+| Live preview | Track current restore operation, frame, timestamp, and preview image when available. |
+| Pro workflow | Capture verification profile, rights declaration, export profile, WAV sidecar preference, and provider routing. |
+| Report ledger | Track Home reports, Pro audit reports, warnings, output paths, and generated files. |
 
 ## Conversion Pipeline
 
@@ -38,11 +47,11 @@ RawCD uses a typographic restoration-lab design: pure white workspace, moss-gree
 flowchart LR
   A["USB CD/DVD drive"] --> B["Disc classifier"]
   B --> C["DVD-Video, VCD/SVCD, or data video"]
-  C --> D["FFmpeg MP4 conversion"]
-  D --> E["Freeze detection"]
-  E --> F["Optional RIFE repair adapter"]
-  F --> G["MP4 output and report"]
-  E --> G
+  C --> D["Recovery lane and rights gate"]
+  D --> E["Damage detection and timeline"]
+  E --> F["Provider routing and restore decision"]
+  F --> G["Export profile"]
+  G --> H["Home report or Pro audit report"]
 ```
 
 ## Features
@@ -51,11 +60,15 @@ flowchart LR
 | --- | --- |
 | Device scanning | Uses `lsblk` to find Linux optical drives and mounted media. |
 | Disc inspection | Detects DVD-Video, VCD/SVCD, and data-video layouts. |
-| Conversion | Creates one high-quality H.264/AAC MP4 per detected source. |
-| Audio | Preserves the primary audio stream when present. |
-| Protection handling | Refuses protected or encrypted discs with a clear message. |
-| Repair analysis | Runs FFmpeg `freezedetect` to find frozen ranges. |
-| AI repair adapter | Provides installer-managed `rife-ncnn-vulkan` support for interpolation workflows. |
+| Home restore | Creates high-quality H.264/AAC MP4 output for personal media. |
+| Pro restore | Supports ProRes 422 HQ, DNxHR HQX, FFV1 MKV, and optional WAV sidecar extraction. |
+| Recovery modes | Supports Quick Recovery and Maximum Recovery request paths. |
+| Restore modes | Supports Faithful Restore and Enhanced Restore; Enhanced Restore applies conservative FFmpeg cleanup filters for Home MP4 exports. |
+| Protection handling | Refuses protected Home media and gates Pro workflows behind verification and rights metadata. |
+| Repair analysis | Runs FFmpeg `freezedetect`, maps damaged ranges, and records frame-state timelines. |
+| Provider routing | Exposes local, Ollama, Topaz, and cloud-provider configuration and health checks. |
+| Live preview | Tracks job-bound restore operation, frame, timestamp, and preview image URL when generated. |
+| Reports | Writes Home JSON reports and Pro JSON/Markdown audit reports with sensitive values redacted. |
 | Desktop package | Builds a Tauri `.deb` package for Ubuntu-compatible Linux desktops. |
 
 ## Architecture
@@ -166,15 +179,19 @@ Use RawCD in this order:
 3. Choose the detected mounted source. If the drive is not listed, enter the mount point in **Manual mount path**, for example `/media/user/MY_DISC`.
 4. Select **Inspect media**. RawCD classifies the disc as DVD-Video, VCD/SVCD, data video, or unknown.
 5. Review the clip ledger. RawCD lists each playable source it found before conversion starts.
-6. Choose the output folder. The default is `~/Videos/RawCD`.
-7. Leave **Preserve source resolution and high-quality H.264/AAC output** enabled for normal use.
-8. Leave **Use AI repair** enabled if you want RawCD to attempt configured repair support for damaged or frozen ranges. If no repair adapter is configured, RawCD still reports freeze warnings.
-9. Select **Convert to MP4**.
-10. Watch the progress bar and engine ledger for status, warnings, output paths, and errors.
-11. Use **Cancel** to request cancellation while a job is running.
-12. Use **Open output** after a completed job to open the output folder.
+6. Choose **Home Restore** for personal MP4 output, or **Studio / Pro** for approved rights-holder work.
+7. Choose **Quick Recovery** or **Maximum Recovery**.
+8. Choose **Faithful Restore** or **Enhanced Restore**.
+9. Choose the output folder. The default is `~/Videos/RawCD`.
+10. For Home Restore, select **Start Home Restore**. RawCD writes MP4 output and a `.rawcd-home-report.json` sidecar report.
+11. For Studio / Pro, complete the Pro verification profile and rights declaration, then choose the export profile: ProRes 422 HQ, DNxHR HQX, or FFV1 MKV.
+12. Enable **Extract WAV audio sidecar** when a Pro project needs separate PCM audio.
+13. Use the provider routing controls to enable or test available enhancement providers.
+14. Watch the progress bar, live preview panel, timeline markers, report panel, and engine ledger for status, warnings, output paths, and errors.
+15. Use **Cancel** to request cancellation while a job is running.
+16. Use **Open output** or the report open controls after a completed job to open generated files.
 
-The output is one MP4 file per detected source. RawCD creates unique filenames if the output folder already contains a file with the same name.
+RawCD creates unique filenames if the output folder already contains a file with the same name.
 
 ## Preview Without Desktop Shell
 
@@ -209,18 +226,22 @@ In browser preview mode, **Open output** does not launch the file manager becaus
 | Manual path fails | Confirm the path exists and points to the mounted disc root, not the device path. |
 | Conversion fails immediately | Confirm `ffmpeg` and `ffprobe` are installed and available on `PATH`. |
 | Protected-media error | RawCD does not bypass encryption, CSS, DRM, or copy protection. Use only personal, unprotected media. |
+| Home restore refuses a source | Confirm the source is personal and unprotected. Home Restore is intentionally blocked for protected media. |
+| Pro restore stays locked | Save a complete Pro profile, obtain approved verification status, and fill every rights-declaration field. |
+| Provider test fails | Confirm the provider binary, service, license, local model, API key, or network access required by that provider. |
 | Browser preview cannot connect | Start `python3 -m rawcd.server --host 127.0.0.1 --port 8765` before opening the Vite URL. |
 | Desktop app cannot start engine | Activate the Python environment and confirm `python3 -m rawcd.server` works from the repository root. |
-| AI repair warning appears | The default engine can detect frozen ranges, but a RIFE repair adapter must be configured before frames can be regenerated. |
+| Preview frame is blank | RawCD still reports job state when no preview JPEG has been generated yet. |
 
 ## What RawCD Lacks Today
 
 - RawCD does not bypass DVD encryption, CSS, DRM, region controls, or copy protection.
 - RawCD does not mount discs by itself. The operating system must mount the disc first.
 - RawCD does not repair unreadable sectors or physically damaged media. It depends on the drive, operating system, and FFmpeg being able to read the source.
-- The current conversion model creates MP4 files from detected sources. It does not preserve DVD menus, chapters, subtitle tracks, alternate audio tracks, or title navigation.
+- The current conversion model creates file exports from detected sources. It does not preserve DVD menus, chapters, subtitle tracks, alternate audio tracks, or title navigation.
 - DVD handling is file-oriented. It does not yet combine multi-file DVD title sets into one title-aware output.
-- The AI repair path is not a complete one-click restoration system yet. Freeze detection is present, and RIFE support exists as an adapter, but the default desktop engine does not configure full frame-regeneration workflow automatically.
+- Enhancement providers must be installed, licensed, configured, and available separately. RawCD routes to them and records decisions; it does not bundle paid or third-party AI models.
+- Pro verification is a local workflow gate in this build. Server-side approval updates require a configured `RAWCD_PRO_VERIFICATION_TOKEN`.
 - The app is Linux-first. macOS and Windows packages are not provided.
 - The generated Debian package is suitable for local packaging checks, but the app is not yet a fully self-contained installer for a clean machine because the Python engine and external media tools still need setup.
 - Real USB-drive acceptance testing still requires a USB optical drive and an unprotected personal disc.

@@ -45,6 +45,32 @@ def test_ollama_health_is_unavailable_when_api_request_fails() -> None:
     assert "offline" in health.message
 
 
+def test_ollama_health_populates_capabilities_from_model_metadata() -> None:
+    provider = OllamaProvider(
+        http_client=FakeHttpClient(
+            {
+                "http://127.0.0.1:11434/api/tags": {
+                    "models": [
+                        {
+                            "name": "rawcd-repair:latest",
+                            "rawcd_capabilities": ["interpolation", "inpainting"],
+                        },
+                    ],
+                },
+            },
+        ),
+    )
+
+    health = provider.health_check()
+
+    assert health.status is ProviderHealthStatus.AVAILABLE
+    assert health.details == {"models": "1"}
+    assert provider.capabilities == (
+        ProviderCapability.INTERPOLATION,
+        ProviderCapability.INPAINTING,
+    )
+
+
 def test_ollama_rejects_non_loopback_base_url_before_request() -> None:
     client = FakeHttpClient({})
     provider = OllamaProvider(base_url="http://169.254.169.254", http_client=client)
