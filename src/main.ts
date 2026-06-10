@@ -112,8 +112,8 @@ function render() {
       <header class="topbar">
         <div class="brand-block">
           <p class="brand-mark">RawCD v0.1</p>
-          <h1>Disc to MP4 restoration desk</h1>
-          <p class="dek">A local proofing table for personal optical media: inspect the source, convert each clip, and keep a clear repair ledger.</p>
+          <h1>Disc restoration desk</h1>
+          <p class="dek">A local proofing table for optical media: inspect the source, restore each clip, and keep a clear repair ledger.</p>
         </div>
         <div class="status-pill tone-${tone}">
           ${state.job ? escapeHtml(state.job.stage) : `${escapeHtml(state.lane === "home" ? "Home Restore" : "Studio / Pro")}: ${activeDeviceCount} mounted source${activeDeviceCount === 1 ? "" : "s"}`}
